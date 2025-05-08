@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+
+contract AdvancedToken is ERC20, Ownable, Pausable {
+    // Governance Variables
+    address public governanceContract;
+    uint256 public proposalThreshold;
+
+
+    // Staking Variables
+    mapping(address => uint256) public stakedBalance;
+    mapping(address => uint256) public stakingStartTime;
+    uint256 public stakingRewardRate = 10;
+
+
+    // Airdrop Variables
+    mapping(address => bool) public airdropRecipients;
+
+
+    // Bridge Variables
+    address public bridgeAddress;
+    bool public isBridgeActive;
+
+
+    // Events
+    event Staked(address indexed user, uint256 amount);
+    event Unstaked(address indexed user, uint256 amount);
+    event Airdropped(address[] recipients, uint256 amount);
+    event GovernanceUpdated(address newGovernance);
+    event BridgeUpdated(address newBridge);
+
+
+    constructor(uint256 initialSupply) 
+        ERC20("Resume Token", "RT")
+        Ownable(msg.sender)
+    {
+        _mint(msg.sender, initialSupply);
+        proposalThreshold = 1000 * 10 ** decimals();
+    }
+
+
+    // Governance Functions
+    modifier onlyGovernance() {
+        require(msg.sender == governanceContract, "Not Governance!");
+        _;
+    }
+
+
+    function setGovernance(address _governance) external onlyOwner {
+        governanceContract = _governance;
+        emit GovernanceUpdated(_governance);
+    }
+
+
+    // Staking Functions
+    function stake(uint256 amount) external whenNotPaused {
+        require(balanceOf(msg.sender) >= amount, "Insufficient balance!");
+        _transfer(msg.sender, address(this), amount);
+        stakedBalance[msg.sender] += amount;
+        stakingStartTime[msg.sender] = block.timestamp;
+        emit Staked(msg.sender, amount);
+    }
+
+
+    function unstake() external {
+        uint256 amount = stakedBalance[msg.sender];
+        require(amount > 0, "No staked balance!");
+
+        uint256 reward = calculateReward(msg.sender);
+        _mint(msg.sender, reward);
+        _transfer(address(this), msg.sender, amount);
+
+        stakedBalance[msg.sender] = 0;
+        emit Unstaked(msg.sender, amount + reward);
+    }
+
+
+    function calculateReward(address user) public view returns (uint256) {
+        uint256 duration = (block.timestamp - stakingStartTime[user]) / 1 days;
+        return (stakedBalance[user] * stakingRewardRate * duration) / 36500;
+    }
+
+
+    // Airdrop Functions
+    function airdrop(address[] calldata recipients, uint256 amount) external onlyOwner {
+        require(!paused(), "Contract is paused!");
+        uint256 totalAmount = amount * recipients.length;
+        require(balanceOf(msg.sender) >= totalAmount, "Insufficient balance!");
+
+        for (uint256 i = 0; i < recipients.length; i++) {
+            _transfer(msg.sender, recipients[i], amount);
+            airdropRecipients[recipients[i]] = true;
+        }
+        emit Airdropped(recipients, amount);
+    }
+
+
+    // Bridge Functions
+    function mintFromBridge(address to, uint256 amount) external {
+        require(msg.sender == bridgeAddress && isBridgeActive, "Bridge not active!");
+        _mint(to, amount);
+    }
+
+
+    function burnForBridge(uint256 amount) external {
+        _burn(msg.sender, amount);
+    }
+
+
+    function toggleBridge(bool _status) external onlyGovernance {
+        isBridgeActive = _status;
+    }
+
+
+    // Emergency Functions
+    function pause() external onlyGovernance {
+        _pause();
+    }
+
+
+    function unpause() external onlyGovernance {
+        _unpause();
+    }
+}
